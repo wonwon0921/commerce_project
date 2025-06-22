@@ -249,21 +249,77 @@ def cluster_sales_analysis(df, rfm):
 
     print("合併後客戶數:", df_rfm['CustomerID'].nunique())
 
-    # 各群每月消費趨勢
-    df_rfm['Month'] = df_rfm['Date'].dt.to_period('M')
+    # 1. 準備時間序列數據
+    df_rfm['Month'] = df_rfm['Date'].dt.to_period('M').astype(str)
     monthly_cluster = df_rfm.groupby(['Cluster', 'Month'])['Total'].sum().reset_index()
 
+    # 2. 篩選指定時間範圍 (2010-12 至 2011-12)
+    time_range = monthly_cluster[
+        (monthly_cluster['Month'] >= '2010-12') &
+        (monthly_cluster['Month'] <= '2011-12')
+        ].copy()
+
+    # 3. 時間序列描述性統計 (按月分組)
+    print("各群組按月消費趨勢統計：")
+    trend_stats = time_range.groupby(['Cluster', 'Month'])['Total'].agg(['sum', 'mean', 'std', 'min', 'max']).round(2)
+    print(trend_stats)
+
+    # 4. 繪製趨勢折線圖
+    plt.figure(figsize=(14, 8))
+    sns.lineplot(
+        data=time_range,
+        x='Month',
+        y='Total',
+        hue='Cluster',
+        style='Cluster',
+        markers=True,
+        dashes=False,
+        linewidth=2.5,
+        palette='viridis'
+    )
+
+    plt.title('各群組每月消費趨勢 (2010/12 - 2011/12)', fontsize=14, pad=20)
+    plt.xlabel('月份', fontsize=12)
+    plt.ylabel('總消費金額', fontsize=12)
+    plt.xticks(rotation=45)
+    plt.grid(axis='y', alpha=0.3)
+    plt.legend(title='群組', bbox_to_anchor=(1.05, 1), loc='upper left')
+
+    # 標記特殊月份
+    for cluster in time_range['Cluster'].unique():
+        cluster_data = time_range[time_range['Cluster'] == cluster]
+        max_month = cluster_data.loc[cluster_data['Total'].idxmax(), 'Month']
+        max_value = cluster_data['Total'].max()
+        plt.annotate(f'Max: {max_value:,.0f}',
+                     xy=(max_month, max_value),
+                     xytext=(10, 10),
+                     textcoords='offset points',
+                     arrowprops=dict(arrowstyle='->'))
+
+    plt.tight_layout()
+    plt.savefig(f"{OUTPUT_DIR}/cluster_monthly_trends.png", dpi=300, bbox_inches='tight')
+    plt.show()
+
+    # 5. 進階統計分析
+    print("\n進階趨勢分析：")
+    for cluster in sorted(time_range['Cluster'].unique()):
+        cluster_data = time_range[time_range['Cluster'] == cluster].copy()
+
+        # 計算月環比成長率
+        cluster_data['Growth'] = cluster_data['Total'].pct_change() * 100
+
+        # 輸出關鍵指標
+        print(f"\n群組 {cluster} 趨勢特徵：")
+        print(f"平均月消費: {cluster_data['Total'].mean():,.0f}")
+        print(
+            f"最高成長月份: {cluster_data.loc[cluster_data['Growth'].idxmax(), 'Month']} ({cluster_data['Growth'].max():.1f}%)")
+        print(f"消費波動率 (CV): {(cluster_data['Total'].std() / cluster_data['Total'].mean()):.2f}")
+        print(
+            f"季節性指數 (12月占比): {(cluster_data[cluster_data['Month'].str.endswith('-12')]['Total'].sum() / cluster_data['Total'].sum()):.1%}")
     plt.figure(figsize=(12, 6))
     for cluster in sorted(monthly_cluster['Cluster'].unique()):
         cluster_data = monthly_cluster[monthly_cluster['Cluster'] == cluster]
         plt.plot(cluster_data['Month'].astype(str), cluster_data['Total'], label=f'Cluster {cluster}')
-    plt.title("各群客戶每月總消費金額變化")
-    plt.xlabel("月份")
-    plt.ylabel("總消費金額")
-    plt.legend()
-    plt.xticks(rotation=45)
-    plt.tight_layout()
-    plt.show()
 
     # 各群總銷售額與佔比
     cluster_sales_share = df_rfm.groupby('Cluster')['Total'].sum().reset_index()
