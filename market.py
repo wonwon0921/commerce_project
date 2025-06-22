@@ -1,5 +1,6 @@
 import os
 import pandas as pd
+import numpy as np
 import sqlite3
 import plotly.express as px
 from sklearn.preprocessing import StandardScaler
@@ -32,6 +33,7 @@ def preprocess_data(df):
     df['Total'] = df['Quantity'] * df['UnitPrice']
     df['MemberType'] = df['CustomerID'].apply(lambda x: 'Non-Member' if x == 'Unknown' else 'Member')
     df = df.drop(columns=['InvoiceDate', 'Time'], errors='ignore')
+
     return df
 
 def member_vs_nonmember_analysis(df):
@@ -95,6 +97,14 @@ def score_rfm(rfm):
         rfm[col] = rfm[col].round().astype(int).clip(1, 5)
     rfm['RFM_Score'] = rfm['R_Score'].astype(str) + rfm['F_Score'].astype(str) + rfm['M_Score'].astype(str)
     return rfm
+def print_rfm_quantiles(rfm_filtered):
+    print("\nRFM 各分位數（每 20%，對應 5 分制）")
+
+    quantiles = [0.0, 0.2, 0.4, 0.6, 0.8, 1.0]
+
+    for col in ['Recency', 'Frequency', 'Monetary']:
+        print(f"\n{col} 分位數：")
+        print(rfm_filtered[col].quantile(quantiles).round(2))
 
 def rfm_analysis(df):
     lower_q = 0.05
@@ -114,6 +124,10 @@ def rfm_analysis(df):
         (rfm['Monetary'] <= rfm['Monetary'].quantile(upper_q))
     ].copy()
 
+    # 新增對數轉換欄位（避免 log(0) 用 log1p）
+    rfm_filtered['Recency_log'] = np.log1p(rfm_filtered['Recency'])
+    rfm_filtered['Monetary_log'] = np.log1p(rfm_filtered['Monetary'])
+    print_rfm_quantiles(rfm_filtered)
     print(f"原始顧客數: {len(rfm)}, 過濾後顧客數: {len(rfm_filtered)}")
     print("\n過濾後 RFM 描述統計：")
     print(rfm_filtered.describe())
@@ -123,7 +137,6 @@ def rfm_analysis(df):
 
     print("\nRFM 分數預覽：")
     print(rfm_filtered[['CustomerID', 'Recency', 'Frequency', 'Monetary', 'RFM_Score']].head(10))
-
     fig = px.histogram(
         rfm_filtered,
         x='RFM_Score',
@@ -142,7 +155,8 @@ def rfm_analysis(df):
 
     return rfm_filtered
 def kmeans_clustering(rfm):
-    rfm_values = rfm[['Recency', 'Frequency', 'Monetary']].copy()
+    # 使用對數轉換的欄位來分群
+    rfm_values = rfm[['Recency_log', 'Frequency', 'Monetary_log']].copy()
     scaler = StandardScaler()
     rfm_scaled = scaler.fit_transform(rfm_values)
 
@@ -168,13 +182,17 @@ def kmeans_clustering(rfm):
     plt.savefig(elbow_path)
     plt.show()
 
-    # 預設使用 4 群
+    # 使用 4 群
     kmeans = KMeans(n_clusters=4, random_state=42, n_init=10)
     rfm['Cluster'] = kmeans.fit_predict(rfm_scaled)
 
     cluster_summary = rfm.groupby('Cluster')[['Recency', 'Frequency', 'Monetary']].mean().round(2)
     cluster_summary['Count'] = rfm['Cluster'].value_counts().sort_index()
     print("每群統計摘要：\n", cluster_summary)
+
+    rfm_stats = rfm.groupby('Cluster')[['Recency', 'Frequency', 'Monetary']].agg(['mean', 'std', 'min', 'max']).round(2)
+    print("\n各群組 RFM 描述性統計（平均、標準差、最小值、最大值）：")
+    print(rfm_stats)
 
     rfm.to_csv(f"{OUTPUT_DIR}/rfm_kmeans_segmented.csv", index=False)
 
@@ -189,6 +207,33 @@ def kmeans_clustering(rfm):
     webbrowser.open(rfm_3d_html)
 
     return rfm
+
+def rfm_cluster_visualizations(rfm):
+    #  銷售金額佔比 (圓餅圖)
+    cluster_sales = rfm.groupby('Cluster')['Monetary'].sum().reset_index()
+    cluster_sales['SalesShare'] = cluster_sales['Monetary'] / cluster_sales['Monetary'].sum()
+
+    plt.figure(figsize=(7, 7))
+    plt.pie(cluster_sales['SalesShare'], labels=cluster_sales['Cluster'], autopct='%1.1f%%', startangle=90, colors=sns.color_palette('Set2'))
+    plt.title('各群銷售金額佔比')
+    plt.axis('equal')
+    plt.savefig(f"{OUTPUT_DIR}/sales_share_pie.png")
+    plt.show()
+
+    #  客戶比例 (長條圖)
+    cluster_counts = rfm['Cluster'].value_counts().reset_index()
+    cluster_counts.columns = ['Cluster', 'CustomerCount']
+    cluster_counts['Ratio'] = cluster_counts['CustomerCount'] / cluster_counts['CustomerCount'].sum() * 100
+
+    plt.figure(figsize=(8, 6))
+    sns.barplot(x='Cluster', y='Ratio', data=cluster_counts, palette='Set2')
+    plt.title('各群客戶數比例 (%)')
+    plt.ylabel('比例 (%)')
+    plt.xlabel('群組')
+    plt.tight_layout()
+    plt.savefig(f"{OUTPUT_DIR}/customer_ratio_bar.png")
+    plt.show()
+
 def cluster_sales_analysis(df, rfm):
     df['CustomerID'] = df['CustomerID'].astype(str)
     rfm['CustomerID'] = rfm['CustomerID'].astype(str)
@@ -348,7 +393,10 @@ def main():
 
     rfm = kmeans_clustering(rfm)
 
+    rfm_cluster_visualizations(rfm)
+
     cluster_sales_analysis(df, rfm)
+
 
 
 if __name__ == "__main__":
