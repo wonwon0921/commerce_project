@@ -318,10 +318,6 @@ def cluster_sales_analysis(df, rfm):
         print(
             f"最高成長月份: {cluster_data.loc[cluster_data['Growth'].idxmax(), 'Month']} ({cluster_data['Growth'].max():.1f}%)")
         print(f"消費波動率 (CV，排除2011-12): {cv:.2f}")
-    plt.figure(figsize=(12, 6))
-    for cluster in sorted(monthly_cluster['Cluster'].unique()):
-        cluster_data = monthly_cluster[monthly_cluster['Cluster'] == cluster]
-        plt.plot(cluster_data['Month'].astype(str), cluster_data['Total'], label=f'Cluster {cluster}')
 
     # 各群總銷售額與佔比
     cluster_sales_share = df_rfm.groupby('Cluster')['Total'].sum().reset_index()
