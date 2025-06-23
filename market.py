@@ -261,7 +261,7 @@ def cluster_sales_analysis(df, rfm):
 
     # 3. 時間序列描述性統計 (按月分組)
     print("各群組按月消費趨勢統計：")
-    trend_stats = time_range.groupby(['Cluster', 'Month'])['Total'].agg(['sum', 'mean', 'std', 'min', 'max']).round(2)
+    trend_stats = time_range.groupby(['Cluster', 'Month'])['Total'].agg('sum').round(2)
     print(trend_stats)
 
     # 4. 繪製趨勢折線圖
@@ -308,14 +308,16 @@ def cluster_sales_analysis(df, rfm):
         # 計算月環比成長率
         cluster_data['Growth'] = cluster_data['Total'].pct_change() * 100
 
+        # 排除2011-12月計算CV
+        cluster_data_cv = cluster_data[cluster_data['Month'] != '2011-12']
+        cv = cluster_data_cv['Total'].std() / cluster_data_cv['Total'].mean()
+
         # 輸出關鍵指標
         print(f"\n群組 {cluster} 趨勢特徵：")
-        print(f"平均月消費: {cluster_data['Total'].mean():,.0f}")
+        print(f"平均月消費（全部月份）: {cluster_data['Total'].mean():,.0f}")
         print(
             f"最高成長月份: {cluster_data.loc[cluster_data['Growth'].idxmax(), 'Month']} ({cluster_data['Growth'].max():.1f}%)")
-        print(f"消費波動率 (CV): {(cluster_data['Total'].std() / cluster_data['Total'].mean()):.2f}")
-        print(
-            f"季節性指數 (12月占比): {(cluster_data[cluster_data['Month'].str.endswith('-12')]['Total'].sum() / cluster_data['Total'].sum()):.1%}")
+        print(f"消費波動率 (CV，排除2011-12): {cv:.2f}")
     plt.figure(figsize=(12, 6))
     for cluster in sorted(monthly_cluster['Cluster'].unique()):
         cluster_data = monthly_cluster[monthly_cluster['Cluster'] == cluster]
